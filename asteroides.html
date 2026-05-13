@@ -1,0 +1,1382 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Detección Temprana de Asteroides Peligrosos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+body {
+  font-family: 'Space Grotesk', sans-serif;
+  background: #000;
+  color: #fff;
+  overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+}
+
+#canvas-container {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 1;
+}
+
+/* UI Overlay */
+#ui {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 10;
+  pointer-events: none;
+}
+#ui > * { pointer-events: auto; }
+
+/* ==================== HEADER ==================== */
+#header {
+  position: absolute;
+  top: 28px; left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  z-index: 20;
+  line-height: 1.6;
+}
+#header h1 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  text-shadow: 0 0 30px rgba(255,100,50,0.5);
+  background: linear-gradient(135deg, #ff6b35, #f7c948, #00d4ff);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 2px;
+}
+#header p {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ==================== SEARCH ==================== */
+#search-box {
+  position: absolute;
+  top: 105px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  width: 360px;
+}
+#search-box input {
+  width: 100%;
+  padding: 12px 20px;
+  border-radius: 28px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(12px);
+  color: #fff;
+  font-size: 0.85rem;
+  outline: none;
+  transition: all 0.3s;
+  font-family: 'Space Grotesk', sans-serif;
+}
+#search-box input::placeholder { color: rgba(255,255,255,0.25); }
+#search-box input:focus {
+  border-color: rgba(255,200,50,0.3);
+  box-shadow: 0 0 30px rgba(255,200,50,0.1);
+}
+#search-results {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  border-radius: 14px;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.06);
+  display: none;
+}
+#search-results div {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.2s;
+  pointer-events: auto;
+}
+#search-results div:hover { background: rgba(255,255,255,0.06); }
+#search-results div span.tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.6rem;
+  margin-left: 10px;
+}
+.tag-hazard { background: rgba(255,50,50,0.25); color: #ff6666; }
+.tag-safe { background: rgba(50,200,255,0.15); color: #66ddff; }
+
+/* ==================== TOOLTIP ==================== */
+#tooltip {
+  position: absolute;
+  display: none;
+  z-index: 30;
+  background: rgba(0,0,0,0.88);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  padding: 22px 26px;
+  min-width: 260px;
+  max-width: 300px;
+  pointer-events: auto;
+  box-shadow: 0 15px 50px rgba(0,0,0,0.7);
+}
+#tooltip .tt-name {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+#tooltip .tt-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  padding: 5px 0;
+}
+#tooltip .tt-row .tt-label { color: rgba(255,255,255,0.35); }
+#tooltip .tt-row .tt-val { font-weight: 500; }
+#tooltip .tt-status {
+  margin-top: 12px;
+  text-align: center;
+  padding: 6px 12px;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.tt-status-hazard { background: rgba(255,50,50,0.15); color: #ff6666; border: 1px solid rgba(255,50,50,0.15); }
+.tt-status-safe { background: rgba(50,200,255,0.1); color: #66ddff; border: 1px solid rgba(50,200,255,0.12); }
+
+/* ==================== STATS BAR ==================== */
+#stats {
+  position: absolute;
+  bottom: 35px; left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 40px;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 20px;
+  padding: 18px 40px;
+  z-index: 20;
+}
+.stat-item { text-align: center; }
+.stat-item .number {
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.stat-item .label {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: rgba(255,255,255,0.4);
+  margin-top: 4px;
+}
+.stat-hazard .number { color: #ff4444; text-shadow: 0 0 18px rgba(255,50,50,0.4); }
+.stat-safe .number { color: #44d9ff; text-shadow: 0 0 18px rgba(50,200,255,0.25); }
+.stat-total .number { color: #fff; }
+.stat-pct .number { color: #f7c948; text-shadow: 0 0 18px rgba(255,200,50,0.25); }
+
+/* ==================== CONTROLS ==================== */
+#controls {
+  position: absolute;
+  bottom: 120px; right: 28px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#controls button {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(10px);
+  color: rgba(255,255,255,0.6);
+  font-size: 1.05rem;
+  cursor: pointer;
+  transition: all 0.25s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#controls button:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.2);
+  color: #fff;
+  transform: scale(1.05);
+}
+#controls button.active {
+  border-color: #f7c948;
+  color: #f7c948;
+  box-shadow: 0 0 18px rgba(255,200,50,0.15);
+}
+
+/* ==================== METRICS BUTTON ==================== */
+#toggle-metrics {
+  position: absolute;
+  top: 105px; right: 28px;
+  z-index: 20;
+  padding: 10px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(10px);
+  color: rgba(255,255,255,0.6);
+  font-size: 0.72rem;
+  font-family: 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  transition: all 0.25s;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+#toggle-metrics:hover {
+  background: rgba(255,255,255,0.08);
+  color: #fff;
+}
+#toggle-metrics.active {
+  border-color: #00d4ff;
+  color: #00d4ff;
+}
+
+/* ==================== METRICS PANEL ==================== */
+#metrics-panel {
+  position: absolute;
+  top: 50%; right: 28px;
+  transform: translateY(-50%);
+  z-index: 25;
+  width: 380px;
+  max-height: 75vh;
+  overflow-y: auto;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(28px);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 22px;
+  padding: 28px;
+  display: none;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+#metrics-panel.show { display: block; }
+#metrics-panel h2 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 18px;
+  text-align: center;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.6);
+}
+#metrics-panel h3 {
+  font-size: 0.72rem;
+  font-weight: 500;
+  margin: 20px 0 10px;
+  color: rgba(255,255,255,0.4);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+#metrics-panel .scenario-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+#metrics-panel .scenario-tabs button {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.4);
+  font-size: 0.65rem;
+  font-family: 'Space Grotesk', sans-serif;
+  cursor: pointer;
+  transition: all 0.25s;
+  letter-spacing: 0.5px;
+  line-height: 1.3;
+}
+#metrics-panel .scenario-tabs button:hover { background: rgba(255,255,255,0.06); }
+#metrics-panel .scenario-tabs button.active {
+  border-color: #f7c948;
+  color: #f7c948;
+  background: rgba(255,200,50,0.06);
+}
+.chart-container { margin: 16px 0; }
+.chart-container canvas { width: 100% !important; }
+
+/* Model comparison bars */
+.model-compare {
+  margin: 10px 0;
+}
+.model-compare .mc-label-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: rgba(255,255,255,0.35);
+  margin-bottom: 3px;
+}
+.model-compare .mc-bar-bg {
+  height: 18px;
+  border-radius: 9px;
+  background: rgba(255,255,255,0.04);
+  overflow: hidden;
+  position: relative;
+}
+.model-compare .mc-bar-fill {
+  height: 100%;
+  border-radius: 9px;
+  transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+}
+.model-compare .mc-bar-fill .mc-bar-val {
+  font-size: 0.6rem;
+  font-weight: 600;
+  margin-left: auto;
+  color: rgba(255,255,255,0.85);
+}
+.mc-bar-rf { background: linear-gradient(90deg, #ff6b35, #ff8c5a); }
+.mc-bar-nn { background: linear-gradient(90deg, #00aaff, #44d4ff); }
+
+.mc-bar-row {
+  margin: 6px 0;
+}
+.mc-legend {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  margin: 12px 0 8px;
+  font-size: 0.6rem;
+}
+.mc-legend span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(255,255,255,0.4);
+}
+.mc-legend .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot-rf { background: #ff6b35; }
+.dot-nn { background: #00aaff; }
+
+/* Comparison summary cards */
+.summary-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.summary-card {
+  flex: 1;
+  padding: 10px 6px;
+  border-radius: 10px;
+  text-align: center;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.summary-card .sc-label {
+  font-size: 0.55rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255,255,255,0.25);
+}
+.summary-card .sc-val {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.sc-rf .sc-val { color: #ff6b35; }
+.sc-nn .sc-val { color: #00aaff; }
+
+/* Confusion matrix */
+.confusion-matrix {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: 5px;
+  margin: 10px 0;
+  justify-content: center;
+}
+.confusion-matrix .cm-cell {
+  width: 70px;
+  height: 50px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 0.65rem;
+}
+.cm-cell .cm-num { font-size: 1rem; font-weight: 700; }
+.cm-cell .cm-label { font-size: 0.5rem; color: rgba(255,255,255,0.35); margin-top: 1px; letter-spacing: 1px; }
+.cm-tn { background: rgba(50,200,255,0.08); }
+.cm-fp { background: rgba(255,200,50,0.06); }
+.cm-fn { background: rgba(255,100,50,0.08); }
+.cm-tp { background: rgba(255,50,50,0.1); }
+.cm-header { font-size: 0.5rem; color: rgba(255,255,255,0.2); letter-spacing: 1px; display: flex; align-items: center; justify-content: center; }
+
+/* ==================== LEGEND ==================== */
+#legend {
+  position: absolute;
+  bottom: 115px; left: 28px;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 0.72rem;
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(8px);
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+#legend .leg-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.leg-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+}
+.leg-danger .leg-dot { background: #ff4444; box-shadow: 0 0 10px rgba(255,50,50,0.4); }
+.leg-safe .leg-dot { background: #44d9ff; box-shadow: 0 0 10px rgba(50,200,255,0.2); }
+
+/* ==================== SCROLLBARS ==================== */
+#metrics-panel::-webkit-scrollbar { width: 4px; }
+#metrics-panel::-webkit-scrollbar-track { background: transparent; }
+#metrics-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 4px; }
+#search-results::-webkit-scrollbar { width: 3px; }
+#search-results::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+/* ==================== LOADING ==================== */
+#loading {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  transition: opacity 0.8s;
+}
+#loading.hidden { opacity: 0; pointer-events: none; }
+#loading .spinner {
+  width: 50px; height: 50px;
+  border: 3px solid rgba(255,255,255,0.04);
+  border-top: 3px solid #f7c948;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 24px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading p {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.3);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p>Cargando datos de asteroides...</p>
+</div>
+
+<div id="canvas-container"></div>
+
+<div id="ui">
+  <div id="header">
+    <h1>✦ Detección Temprana de Asteroides</h1>
+    <p>Clasificación de Objetos Cercanos a la Tierra (NEO)</p>
+  </div>
+
+  <div id="search-box">
+    <input type="text" id="search-input" placeholder="Buscar asteroide por nombre..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+
+  <button id="toggle-metrics">📊 Métricas</button>
+
+  <div id="metrics-panel">
+    <div class="chart-container" style="margin-bottom:16px;">
+      <canvas id="distChart"></canvas>
+    </div>
+    <h2>Resultados del Modelo</h2>
+    <div class="scenario-tabs">
+      <button class="active" data-scenario="all">Con todas las variables</button>
+      <button data-scenario="no-moid">Sin MOID / H</button>
+    </div>
+    <div id="metrics-content">
+      <div class="mc-legend">
+        <span><span class="dot dot-rf"></span> Random Forest</span>
+        <span><span class="dot dot-nn"></span> Red Neuronal</span>
+      </div>
+      <div class="model-compare">
+        <div class="mc-label-row"><span>Precisión</span><span><span data-m="rf-p">0.99</span> · <span data-m="nn-p">0.82</span></span></div>
+        <div class="mc-bar-row">
+          <div class="mc-bar-bg"><div class="mc-bar-fill mc-bar-rf" id="bar-rf-p" style="width:99%"><span class="mc-bar-val">99%</span></div></div>
+        </div>
+        <div class="mc-bar-row">
+          <div class="mc-bar-bg"><div class="mc-bar-fill mc-bar-nn" id="bar-nn-p" style="width:82%"><span class="mc-bar-val">82%</span></div></div>
+        </div>
+      </div>
+      <div class="model-compare">
+        <div class="mc-label-row"><span>Recall</span><span><span data-m="rf-r">0.99</span> · <span data-m="nn-r">1.00</span></span></div>
+        <div class="mc-bar-row">
+          <div class="mc-bar-bg"><div class="mc-bar-fill mc-bar-rf" id="bar-rf-r" style="width:99%"><span class="mc-bar-val">99%</span></div></div>
+        </div>
+        <div class="mc-bar-row">
+          <div class="mc-bar-bg"><div class="mc-bar-fill mc-bar-nn" id="bar-nn-r" style="width:100%"><span class="mc-bar-val">100%</span></div></div>
+        </div>
+      </div>
+      <div class="model-compare">
+        <div class="mc-label-row"><span>F1-Score</span><span><span data-m="rf-f">0.99</span> · <span data-m="nn-f">0.90</span></span></div>
+        <div class="mc-bar-row">
+          <div class="mc-bar-bg"><div class="mc-bar-fill mc-bar-rf" id="bar-rf-f" style="width:99%"><span class="mc-bar-val">99%</span></div></div>
+        </div>
+        <div class="mc-bar-row">
+          <div class="mc-bar-bg"><div class="mc-bar-fill mc-bar-nn" id="bar-nn-f" style="width:90%"><span class="mc-bar-val">90%</span></div></div>
+        </div>
+      </div>
+
+      <h3>Matriz de Confusión</h3>
+      <div class="confusion-matrix">
+        <div></div>
+        <div class="cm-header">Pred Seguro</div>
+        <div class="cm-header">Pred Peligro</div>
+        <div class="cm-header">Real Seguro</div>
+        <div class="cm-cell cm-tn"><span class="cm-num" data-m="cm-tn">7615</span><span class="cm-label">TN</span></div>
+        <div class="cm-cell cm-fp"><span class="cm-num" data-m="cm-fp">0</span><span class="cm-label">FP</span></div>
+        <div class="cm-header">Real Peligro</div>
+        <div class="cm-cell cm-fn"><span class="cm-num" data-m="cm-fn">5</span><span class="cm-label">FN</span></div>
+        <div class="cm-cell cm-tp"><span class="cm-num" data-m="cm-tp">502</span><span class="cm-label">TP</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="legend">
+    <div class="leg-item leg-danger"><div class="leg-dot"></div> <span id="leg-danger-label">Peligroso (Real)</span></div>
+    <div class="leg-item leg-safe"><div class="leg-dot"></div> <span id="leg-safe-label">Seguro (Real)</span></div>
+  </div>
+
+  <div id="stats">
+    <div class="stat-item stat-total">
+      <div class="number" id="stat-total">0</div>
+      <div class="label">Total</div>
+    </div>
+    <div class="stat-item stat-hazard">
+      <div class="number" id="stat-hazard">0</div>
+      <div class="label">Peligrosos</div>
+    </div>
+    <div class="stat-item stat-safe">
+      <div class="number" id="stat-safe">0</div>
+      <div class="label">Seguros</div>
+    </div>
+    <div class="stat-item stat-pct">
+      <div class="number" id="stat-pct">0%</div>
+      <div class="label">% Peligro</div>
+    </div>
+  </div>
+
+  <div id="tooltip"></div>
+
+  <div id="controls">
+    <button id="btn-rotate" class="active" title="Auto-rotación">⟳</button>
+    <button id="btn-reset" title="Restaurar vista">⌖</button>
+    <button id="btn-filter-hazard" class="active" title="Mostrar peligrosos">⚠</button>
+    <button id="btn-filter-safe" class="active" title="Mostrar seguros">✓</button>
+    <button id="btn-color-mode" title="Alternar color: real vs predicción">🎯</button>
+  </div>
+</div>
+
+<script>
+const DATA_URL = 'asteroides_data.json';
+const Z_SCALE = 3.0;
+
+const METRICS_DATA = {
+  all: {
+    rf: { precision: 0.99, recall: 0.99, f1: 0.99 },
+    nn: { precision: 0.82, recall: 1.00, f1: 0.90 },
+    cm: { tn: 7615, fp: 0, fn: 5, tp: 502 }
+  },
+  'no-moid': {
+    rf: { precision: 0.43, recall: 0.68, f1: 0.53 },
+    nn: { precision: 0.27, recall: 0.92, f1: 0.42 },
+    cm: { tn: 7158, fp: 457, fn: 162, tp: 345 }
+  }
+};
+
+let scene, camera, renderer, controls;
+let asteroidSystem, asteroidData = [];
+let sunMesh;
+let planets = [];
+let raycaster, mouse;
+let autoRotate = true;
+let showHazard = true, showSafe = true;
+let colorMode = 'real';
+let charts = {};
+let selectedAsteroid = null;
+let highlightRing = null;
+let isDragging = false;
+
+// --- Scene setup ---
+function initScene() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+  camera.position.set(5, 6, 8);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+  // Track drag vs click on canvas
+  let pointerDown = null;
+  renderer.domElement.addEventListener('pointerdown', (e) => { pointerDown = { x: e.clientX, y: e.clientY }; isDragging = false; });
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (pointerDown) {
+      const dx = e.clientX - pointerDown.x, dy = e.clientY - pointerDown.y;
+      if (dx * dx + dy * dy > 25) isDragging = true;
+    }
+  });
+  renderer.domElement.addEventListener('pointerup', () => { pointerDown = null; });
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.minDistance = 2;
+  controls.maxDistance = 100;
+  controls.target.set(0, 0, 0);
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.8;
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
+
+// --- Stars background ---
+function createStars() {
+  const geo = new THREE.BufferGeometry();
+  const count = 3000;
+  const pos = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    const r = 30 + Math.random() * 70;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    pos[i*3+2] = r * Math.cos(phi);
+    sizes[i] = 0.5 + Math.random() * 1.5;
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  const mat = new THREE.PointsMaterial({
+    color: 0xffffff,
+    size: 0.08,
+    transparent: true,
+    opacity: 0.7,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const stars = new THREE.Points(geo, mat);
+  scene.add(stars);
+  return stars;
+}
+
+// --- Sun ---
+function createSun() {
+  const geo = new THREE.SphereGeometry(0.35, 32, 32);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
+  const sun = new THREE.Mesh(geo, mat);
+  scene.add(sun);
+
+  const glowGeo = new THREE.SphereGeometry(0.5, 24, 24);
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xff6600,
+    transparent: true,
+    opacity: 0.15,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const glow = new THREE.Mesh(glowGeo, glowMat);
+  scene.add(glow);
+
+  const glowGeo2 = new THREE.SphereGeometry(0.8, 24, 24);
+  const glowMat2 = new THREE.MeshBasicMaterial({
+    color: 0xff4400,
+    transparent: true,
+    opacity: 0.05,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const glow2 = new THREE.Mesh(glowGeo2, glowMat2);
+  scene.add(glow2);
+
+  const light = new THREE.PointLight(0xffaa44, 2, 20);
+  scene.add(light);
+
+  return { sun, glow, glow2, light };
+}
+
+// --- Solar System: planets + orbits ---
+function createOrbitRing(radius, color, opacity) {
+  const pts = [];
+  for (let i = 0; i <= 96; i++) {
+    const a = (i / 96) * Math.PI * 2;
+    pts.push(new THREE.Vector3(radius * Math.cos(a), 0, radius * Math.sin(a)));
+  }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  return new THREE.Line(geo, mat);
+}
+
+function createPlanet(radius, color, orbitR, angle) {
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 16, 16),
+    new THREE.MeshBasicMaterial({ color })
+  );
+  mesh.position.set(orbitR * Math.cos(angle), 0, orbitR * Math.sin(angle));
+  return mesh;
+}
+
+function createSolarSystem() {
+  const planets = [];
+
+  // Mercury
+  const merOrbit = createOrbitRing(0.39, 0xaaaaaa, 0.15);
+  scene.add(merOrbit);
+  const mer = createPlanet(0.025, 0xbbbbbb, 0.39, 1.2);
+  scene.add(mer);
+  planets.push({ mesh: mer, orbitR: 0.39, speed: 4.15, angle: 1.2 });
+
+  // Venus
+  const venOrbit = createOrbitRing(0.72, 0xddbb88, 0.18);
+  scene.add(venOrbit);
+  const ven = createPlanet(0.045, 0xdd9933, 0.72, 2.8);
+  scene.add(ven);
+  planets.push({ mesh: ven, orbitR: 0.72, speed: 1.62, angle: 2.8 });
+
+  // Earth
+  const eaOrbit = createOrbitRing(1.0, 0x4488ff, 0.25);
+  scene.add(eaOrbit);
+  const ea = createPlanet(0.05, 0x4488ff, 1.0, 0);
+  scene.add(ea);
+  planets.push({ mesh: ea, orbitR: 1.0, speed: 1.0, angle: 0 });
+
+  // Mars
+  const maOrbit = createOrbitRing(1.52, 0xcc6644, 0.2);
+  scene.add(maOrbit);
+  const ma = createPlanet(0.035, 0xcc5533, 1.52, 4.5);
+  scene.add(ma);
+  planets.push({ mesh: ma, orbitR: 1.52, speed: 0.53, angle: 4.5 });
+
+  // Asteroid belt (stylized ring of particles between Mars and Jupiter)
+  const beltCount = 2000;
+  const beltGeo = new THREE.BufferGeometry();
+  const beltPos = new Float32Array(beltCount * 3);
+  for (let i = 0; i < beltCount; i++) {
+    const r = 1.8 + Math.random() * 1.8;
+    const a = Math.random() * Math.PI * 2;
+    const y = (Math.random() - 0.5) * 0.3;
+    beltPos[i*3] = r * Math.cos(a);
+    beltPos[i*3+1] = y;
+    beltPos[i*3+2] = r * Math.sin(a);
+  }
+  beltGeo.setAttribute('position', new THREE.BufferAttribute(beltPos, 3));
+  const beltMat = new THREE.PointsMaterial({
+    color: 0x888877,
+    size: 0.015,
+    transparent: true,
+    opacity: 0.3,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  });
+  const belt = new THREE.Points(beltGeo, beltMat);
+  scene.add(belt);
+
+  return planets;
+}
+
+function animatePlanets(planets, time) {
+  for (const p of planets) {
+    p.angle += p.speed * 0.002;
+    p.mesh.position.x = p.orbitR * Math.cos(p.angle);
+    p.mesh.position.z = p.orbitR * Math.sin(p.angle);
+  }
+}
+
+// --- Highlight ring for selected asteroid ---
+function createHighlightRing() {
+  const ringGeo = new THREE.RingGeometry(0.15, 0.2, 32);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0x00ff88,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.9,
+    depthWrite: false
+  });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.visible = false;
+  ring.rotation.x = -Math.PI / 2;
+  scene.add(ring);
+
+  const glowRing = new THREE.RingGeometry(0.25, 0.28, 32);
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0x00ff88,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.2,
+    depthWrite: false
+  });
+  const glow = new THREE.Mesh(glowRing, glowMat);
+  glow.visible = false;
+  glow.rotation.x = -Math.PI / 2;
+  scene.add(glow);
+
+  return { ring, glow };
+}
+
+function selectAsteroid(a) {
+  selectedAsteroid = a;
+  if (!highlightRing) highlightRing = createHighlightRing();
+  const pos = new THREE.Vector3(a.x, a.y, a.z * Z_SCALE);
+  highlightRing.ring.position.copy(pos);
+  highlightRing.ring.visible = true;
+  highlightRing.glow.position.copy(pos);
+  highlightRing.glow.visible = true;
+}
+
+function clearSelection() {
+  selectedAsteroid = null;
+  if (highlightRing) {
+    highlightRing.ring.visible = false;
+    highlightRing.glow.visible = false;
+  }
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+// --- Asteroids ---
+function createAsteroids(data) {
+  asteroidData = data;
+  updateAsteroids();
+}
+
+function updateAsteroids() {
+  if (asteroidSystem) {
+    scene.remove(asteroidSystem);
+    asteroidSystem.geometry.dispose();
+    asteroidSystem.material.dispose();
+  }
+
+  const filtered = asteroidData.filter(a => {
+    if (a.pha && !showHazard) return false;
+    if (!a.pha && !showSafe) return false;
+    return true;
+  });
+
+  const count = filtered.length;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+
+  for (let i = 0; i < count; i++) {
+    const a = filtered[i];
+    positions[i*3] = a.x;
+    positions[i*3+1] = a.y;
+    positions[i*3+2] = a.z * Z_SCALE;
+
+    if (colorMode === 'ml') {
+      const prob = a.prob_rf || 0;
+      if (prob > 0.5) {
+        const p = Math.min(1, (prob - 0.5) * 2.5);
+        colors[i*3] = 0.7 + p * 0.3; colors[i*3+1] = 0.2 * (1 - p); colors[i*3+2] = 0.5 + p * 0.5;
+      } else {
+        const p = Math.min(1, (0.5 - prob) * 2.5);
+        colors[i*3] = 0.1 * (1 - p); colors[i*3+1] = 0.4 + p * 0.5; colors[i*3+2] = 0.2 * (1 - p);
+      }
+    } else if (a.pha) {
+      colors[i*3] = 1.0; colors[i*3+1] = 0.15; colors[i*3+2] = 0.05;
+    } else {
+      colors[i*3] = 0.05; colors[i*3+1] = 0.5; colors[i*3+2] = 1.0;
+    }
+
+    const sz = Math.max(0.04, Math.min(0.18, (26 - (a.H || 18)) / 60));
+    sizes[i] = sz;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+  // Create sprite texture for circular points (soft glow)
+  const canvas = document.createElement('canvas');
+  canvas.width = 24; canvas.height = 24;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(12, 12, 0, 12, 12, 12);
+  gradient.addColorStop(0, 'rgba(180,180,255,1)');
+  gradient.addColorStop(0.15, 'rgba(180,180,255,0.9)');
+  gradient.addColorStop(0.5, 'rgba(120,120,200,0.5)');
+  gradient.addColorStop(1, 'rgba(80,80,150,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 24, 24);
+  const texture = new THREE.CanvasTexture(canvas);
+
+  const mat = new THREE.PointsMaterial({
+    size: 0.09,
+    map: texture,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.85,
+    blending: THREE.NormalBlending,
+    depthWrite: false,
+    sizeAttenuation: true
+  });
+
+  asteroidSystem = new THREE.Points(geo, mat);
+  scene.add(asteroidSystem);
+}
+
+// --- Click detection ---
+function setupInteraction() {
+  raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.1;
+  mouse = new THREE.Vector2();
+
+  renderer.domElement.addEventListener('click', onCanvasClick);
+  renderer.domElement.addEventListener('mousemove', onMouseMove);
+}
+
+function onCanvasClick(event) {
+  if (!asteroidSystem) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects([asteroidSystem]);
+
+  if (intersects.length > 0) {
+    const idx = intersects[0].index;
+    const filtered = getFilteredAsteroids();
+    if (idx !== undefined && idx < filtered.length) {
+      const a = filtered[idx];
+      selectAsteroid(a);
+      showTooltip(a, event.clientX, event.clientY);
+    }
+  }
+}
+
+function onMouseMove(event) {
+  if (!asteroidSystem) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(mouse, camera);
+  const intersects = raycaster.intersectObjects([asteroidSystem]);
+
+  const container = renderer.domElement;
+  if (intersects.length > 0) {
+    container.style.cursor = 'pointer';
+  } else {
+    container.style.cursor = 'default';
+  }
+}
+
+function getFilteredAsteroids() {
+  return asteroidData.filter(a => {
+    if (a.pha && !showHazard) return false;
+    if (!a.pha && !showSafe) return false;
+    return true;
+  });
+}
+
+function showTooltip(a, x, y, fixed) {
+  const tt = document.getElementById('tooltip');
+  const displayName = a.name.replace(/^\(|\)$/g, '').trim();
+  const status = a.pha ? '⚠ Peligroso (Real)' : '✓ Seguro (Real)';
+  const statusClass = a.pha ? 'tt-status-hazard' : 'tt-status-safe';
+  const prob_rf = a.prob_rf !== undefined ? a.prob_rf : 0.5;
+  const prob_nn = a.prob_nn !== undefined ? a.prob_nn : 0.5;
+  const rf_pred = prob_rf > 0.5 ? '⚠ Peligroso' : '✓ Seguro';
+  const nn_pred = prob_nn > 0.5 ? '⚠ Peligroso' : '✓ Seguro';
+  const rf_color = prob_rf > 0.5 ? '#ff6666' : '#66ddff';
+  const nn_color = prob_nn > 0.5 ? '#ff6666' : '#66ddff';
+  tt.innerHTML = `
+    <div class="tt-name">${displayName}</div>
+    <div class="tt-row"><span class="tt-label">H (Magnitud)</span><span class="tt-val">${a.H}</span></div>
+    <div class="tt-row"><span class="tt-label">MOID (UA)</span><span class="tt-val">${a.moid}</span></div>
+    <div class="tt-row"><span class="tt-label">Excentricidad</span><span class="tt-val">${a.e}</span></div>
+    <div class="tt-row"><span class="tt-label">Inclinación</span><span class="tt-val">${a.i}°</span></div>
+    <div class="tt-row"><span class="tt-label">Semieje mayor</span><span class="tt-val">${a.a} UA</span></div>
+    <div class="tt-row" style="border-top:1px solid rgba(255,255,255,0.08);padding-top:5px;margin-top:3px;">
+      <span class="tt-label">RF predice</span>
+      <span class="tt-val" style="color:${rf_color}">${rf_pred} (${(prob_rf*100).toFixed(0)}%)</span>
+    </div>
+    <div class="tt-row">
+      <span class="tt-label">NN predice</span>
+      <span class="tt-val" style="color:${nn_color}">${nn_pred} (${(prob_nn*100).toFixed(0)}%)</span>
+    </div>
+    <div class="tt-status ${statusClass}">${status}</div>
+  `;
+  tt.style.display = 'block';
+
+  if (fixed) {
+    const panel = document.getElementById('metrics-panel');
+    const panelVisible = panel.classList.contains('show');
+    const rightSpace = panelVisible ? panel.offsetWidth + 40 : 30;
+    tt.style.left = (window.innerWidth - tt.offsetWidth - rightSpace) + 'px';
+    tt.style.top = '50%';
+    tt.style.transform = 'translateY(-50%)';
+    tt.style.maxHeight = '70vh';
+    tt.style.overflowY = 'auto';
+  } else {
+    tt.style.transform = 'none';
+    const w = tt.offsetWidth;
+    const h = tt.offsetHeight;
+    let left = x + 18;
+    let top = y - h / 2;
+    if (left + w > window.innerWidth - 20) left = x - w - 18;
+    if (top < 12) top = 12;
+    if (top + h > window.innerHeight - 12) top = window.innerHeight - h - 12;
+    tt.style.left = left + 'px';
+    tt.style.top = top + 'px';
+  }
+}
+
+// --- Search ---
+function setupSearch() {
+  const input = document.getElementById('search-input');
+  const results = document.getElementById('search-results');
+
+  input.addEventListener('input', () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) { results.style.display = 'none'; return; }
+
+    const matches = asteroidData
+      .filter(a => a.name.toLowerCase().includes(q))
+      .slice(0, 8);
+
+    if (matches.length === 0) { results.style.display = 'none'; return; }
+
+    results.innerHTML = matches.map(a => {
+      const tag = a.pha ? '<span class="tag tag-hazard">Peligroso</span>' : '<span class="tag tag-safe">Seguro</span>';
+      const displayName = a.name.replace(/^\(|\)$/g, '').trim();
+      return `<div data-idx="${asteroidData.indexOf(a)}">${displayName} ${tag}</div>`;
+    }).join('');
+    results.style.display = 'block';
+  });
+
+  results.addEventListener('click', (e) => {
+    const div = e.target.closest('div[data-idx]');
+    if (!div) return;
+    const idx = parseInt(div.dataset.idx);
+    const a = asteroidData[idx];
+    if (!a) return;
+
+    // Fly camera to asteroid (offset left so tooltip on right doesn't overlap)
+    const target = new THREE.Vector3(a.x, a.y, a.z * Z_SCALE);
+    const dist = target.length();
+    if (dist < 15) {
+      const dir = target.clone().normalize();
+      const rightVec = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0, 1, 0)).normalize();
+      const camDist = Math.max(0.4, dist * 0.4);
+      const offset = rightVec.multiplyScalar(camDist * 0.5);
+      camera.position.copy(target.clone().add(dir.clone().multiplyScalar(camDist)).add(offset));
+      controls.target.copy(target);
+      controls.update();
+    }
+
+    // Ensure filters show this asteroid
+    if (a.pha && !showHazard) {
+      showHazard = true;
+      document.getElementById('btn-filter-hazard').classList.add('active');
+      updateAsteroids();
+    }
+    if (!a.pha && !showSafe) {
+      showSafe = true;
+      document.getElementById('btn-filter-safe').classList.add('active');
+      updateAsteroids();
+    }
+
+    selectAsteroid(a);
+    showTooltip(a, 0, 0, true);
+    document.getElementById('search-input').value = a.name.replace(/^\(|\)$/g, '').trim();
+    document.getElementById('search-results').style.display = 'none';
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#search-box')) {
+      results.style.display = 'none';
+    }
+  });
+}
+
+// --- Metrics panel ---
+function setupMetrics() {
+  const btn = document.getElementById('toggle-metrics');
+  const panel = document.getElementById('metrics-panel');
+
+  btn.addEventListener('click', () => {
+    panel.classList.toggle('show');
+    btn.classList.toggle('active');
+    setTimeout(() => {
+      Object.values(charts).forEach(c => c && c.resize && c.resize());
+    }, 300);
+  });
+
+  document.querySelectorAll('.scenario-tabs button').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.scenario-tabs button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      updateMetrics(b.dataset.scenario);
+    });
+  });
+
+  updateMetrics('all');
+}
+
+function updateMetrics(scenario) {
+  const m = METRICS_DATA[scenario];
+  if (!m) return;
+
+  document.querySelector('[data-m="rf-p"]').textContent = m.rf.precision.toFixed(2);
+  document.querySelector('[data-m="rf-r"]').textContent = m.rf.recall.toFixed(2);
+  document.querySelector('[data-m="rf-f"]').textContent = m.rf.f1.toFixed(2);
+  document.querySelector('[data-m="nn-p"]').textContent = m.nn.precision.toFixed(2);
+  document.querySelector('[data-m="nn-r"]').textContent = m.nn.recall.toFixed(2);
+  document.querySelector('[data-m="nn-f"]').textContent = m.nn.f1.toFixed(2);
+  document.querySelector('[data-m="cm-tn"]').textContent = m.cm.tn;
+  document.querySelector('[data-m="cm-fp"]').textContent = m.cm.fp;
+  document.querySelector('[data-m="cm-fn"]').textContent = m.cm.fn;
+  document.querySelector('[data-m="cm-tp"]').textContent = m.cm.tp;
+
+  // Update bars
+  const sets = [
+    ['bar-rf-p', m.rf.precision], ['bar-nn-p', m.nn.precision],
+    ['bar-rf-r', m.rf.recall], ['bar-nn-r', m.nn.recall],
+    ['bar-rf-f', m.rf.f1], ['bar-nn-f', m.nn.f1]
+  ];
+  for (const [id, val] of sets) {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.width = (val * 100) + '%';
+      el.querySelector('.mc-bar-val').textContent = (val * 100).toFixed(0) + '%';
+    }
+  }
+
+  if (charts.dist) {
+    const haz = parseInt(document.getElementById('stat-hazard').textContent);
+    const safe = parseInt(document.getElementById('stat-safe').textContent);
+    charts.dist.data.datasets[0].data = [haz, safe];
+    charts.dist.update();
+  }
+}
+
+function createDistChart(hazardous, safe) {
+  const ctx = document.getElementById('distChart').getContext('2d');
+  charts.dist = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Peligrosos', 'Seguros'],
+      datasets: [{
+        data: [hazardous, safe],
+        backgroundColor: ['rgba(255,68,68,0.8)', 'rgba(68,217,255,0.8)'],
+        borderColor: ['#ff4444', '#44d9ff'],
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      cutout: '60%',
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: {
+            color: 'rgba(255,255,255,0.6)',
+            font: { size: 10 },
+            padding: 10
+          }
+        }
+      }
+    }
+  });
+}
+
+// --- Controls ---
+function setupControls() {
+  document.getElementById('btn-rotate').addEventListener('click', function() {
+    autoRotate = !autoRotate;
+    controls.autoRotate = autoRotate;
+    this.classList.toggle('active');
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    camera.position.set(5, 6, 8);
+    controls.target.set(0, 0, 0);
+    controls.update();
+    clearSelection();
+  });
+
+  document.getElementById('btn-filter-hazard').addEventListener('click', function() {
+    showHazard = !showHazard;
+    this.classList.toggle('active');
+    updateAsteroids();
+  });
+
+  document.getElementById('btn-filter-safe').addEventListener('click', function() {
+    showSafe = !showSafe;
+    this.classList.toggle('active');
+    updateAsteroids();
+  });
+
+  document.getElementById('btn-color-mode').addEventListener('click', function() {
+    colorMode = colorMode === 'real' ? 'ml' : 'real';
+    this.classList.toggle('active');
+    const hazDot = document.querySelector('.leg-danger .leg-dot');
+    const safDot = document.querySelector('.leg-safe .leg-dot');
+    if (colorMode === 'ml') {
+      document.getElementById('leg-danger-label').textContent = 'Peligroso (ML)';
+      document.getElementById('leg-safe-label').textContent = 'Seguro (ML)';
+      if (hazDot) { hazDot.style.background = '#aa44dd'; hazDot.style.boxShadow = '0 0 10px rgba(170,68,221,0.5)'; }
+      if (safDot) { safDot.style.background = '#44dd66'; safDot.style.boxShadow = '0 0 10px rgba(68,221,102,0.4)'; }
+    } else {
+      document.getElementById('leg-danger-label').textContent = 'Peligroso (Real)';
+      document.getElementById('leg-safe-label').textContent = 'Seguro (Real)';
+      if (hazDot) { hazDot.style.background = '#ff4444'; hazDot.style.boxShadow = '0 0 10px rgba(255,50,50,0.4)'; }
+      if (safDot) { safDot.style.background = '#44d9ff'; safDot.style.boxShadow = '0 0 10px rgba(50,200,255,0.2)'; }
+    }
+    updateAsteroids();
+  });
+}
+
+// --- Stats ---
+function updateStats(data) {
+  document.getElementById('stat-total').textContent = data.total;
+  document.getElementById('stat-hazard').textContent = data.hazardous;
+  document.getElementById('stat-safe').textContent = data.safe;
+  document.getElementById('stat-pct').textContent = (data.hazardous / data.total * 100).toFixed(1) + '%';
+  if (data.model_info) {
+    const el = document.getElementById('model-stats') || (() => {
+      const d = document.createElement('div');
+      d.id = 'model-stats';
+      d.style.cssText = 'font-size:0.55rem;color:rgba(255,255,255,0.25);text-align:center;margin-top:4px;letter-spacing:0.5px;';
+      document.getElementById('stats').appendChild(d);
+      return d;
+    })();
+    el.textContent = `RF: ${data.model_info.rf_recall}% recall  │  NN: ${data.model_info.nn_recall}% recall`;
+    el.style.marginTop = '6px';
+  }
+}
+
+// --- Animation loop ---
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+
+  if (sunMesh) {
+    sunMesh.sun.rotation.y += 0.005;
+    sunMesh.glow.rotation.x += 0.001;
+    sunMesh.glow.rotation.y += 0.002;
+    sunMesh.glow2.rotation.x -= 0.0005;
+    sunMesh.glow2.rotation.y += 0.001;
+    const pulse = 1 + 0.03 * Math.sin(Date.now() * 0.001);
+    sunMesh.glow.scale.set(pulse, pulse, pulse);
+  }
+
+  if (planets.length) {
+    animatePlanets(planets, Date.now());
+  }
+
+  if (highlightRing && highlightRing.ring.visible) {
+    const t = Date.now() * 0.003;
+    const pulse = 1 + 0.25 * Math.sin(t);
+    highlightRing.ring.scale.set(pulse, pulse, pulse);
+    highlightRing.ring.material.opacity = 0.6 + 0.3 * Math.sin(t + 1);
+    const pulse2 = 1 + 0.4 * Math.sin(t * 0.8);
+    highlightRing.glow.scale.set(pulse2, pulse2, pulse2);
+    highlightRing.glow.material.opacity = 0.1 + 0.15 * Math.sin(t * 0.7);
+  }
+
+  renderer.render(scene, camera);
+}
+
+// --- Main ---
+async function main() {
+  try {
+    initScene();
+    createStars();
+    sunMesh = createSun();
+    planets = createSolarSystem();
+    setupInteraction();
+    setupSearch();
+    setupMetrics();
+    setupControls();
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+    const resp = await fetch(DATA_URL, { signal: controller.signal });
+    clearTimeout(timeout);
+    const data = await resp.json();
+    createAsteroids(data.asteroids);
+    updateStats(data);
+    createDistChart(data.hazardous, data.safe);
+  } catch (err) {
+    console.error('Error:', err);
+    const loading = document.getElementById('loading');
+    if (loading) {
+      const p = loading.querySelector('p');
+      if (p) {
+        if (err.name === 'AbortError') {
+          p.textContent = 'Tiempo de espera agotado (30s). Verifica el servidor.';
+        } else {
+          p.textContent = 'Error: ' + (err.message || err).substring(0, 50) + '. Revisa la consola.';
+        }
+      }
+    }
+    return;
+  }
+
+  document.getElementById('loading').classList.add('hidden');
+  animate();
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  setTimeout(main, 100);
+});
+
+// Close tooltip only when clicking non-canvas UI elements
+document.addEventListener('click', (e) => {
+  if (isDragging) { isDragging = false; return; }
+  const excluded = e.target.closest('#tooltip') || e.target.closest('#search-box') ||
+                   e.target.closest('#controls') || e.target.closest('#canvas-container') ||
+                   e.target.closest('#toggle-metrics') || e.target.closest('#legend');
+  if (!excluded) clearSelection();
+});
+</script>
+</body>
+</html>
